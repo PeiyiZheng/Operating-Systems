@@ -1,0 +1,13 @@
+References:
+https://www3.cs.stonybrook.edu/~porter/courses/cse306/s16/lab2.html // follow the procedure
+https://www.cse.iitb.ac.in/~cs347/labs/lab6.pdf // useful details
+http://www.cs.fsu.edu/~zwang/files/cop4610/Spring2014/project4.pdf // not very important
+
+Log:
+1. Modify kalloc.c to add a reference count to page descriptor structure. Add some helper functions for
+other function to access reference count. Add definitions to defs.h.
+
+2. Modify trap.c to catch and handle(T_PGFLT -- already defined in traps.h, but trap.c never catches it).
+Add exception handler in vm.c since we need walkpgdir.
+
+3. Modify vm.c to implement copy-on-write.

@@ -1,0 +1,170 @@
+README
+Katie Chang + Peiyi Zheng
+kchang50 + pzheng4
+600.418
+Assignment 6
+(Used 2 late days)
+
+Part 1 ::
+Lots of test cases, very helpful.
+We now have six new syscalls: yield, desch, mkrun, tspawn, gettid,
+ texit. Yield now takes a tid and hints at the scheduler that it 
+should run thread tid next. 
+Desch for threads is similar to sleep for procs, and mkrun is 
+similar to a wakeup. Tspawn creates threads given a function 
+pointer f and a void pointer arg. Gettid simply returns the 
+tid of the current thread. Texit exits the current thread 
+after saving the what value to the where, indicating that it 
+safely exited.
+
+We were given the skeleton code for usem, uspin, and uthr, 
+as well as uthr.h and uthrdefs.h. 
+These were implemented for this assignment.
+
+DESIGN for #2: 
+Fix up uspin from last submission thanks to test cases.
+Will need to use uspin lock to ensure no two processes 
+/ threads touch a particular usem at the same time. 
+In order to keep track of the threads that want to acquire 
+the semaphore but are unable to, will need to use some sort 
+of queue / array. 
+If a thread tries to acquire a usem and is unable to 
+because the counter is 0, we will call desch on it and 
+put it in the queue. In usem_release, then, we want to 
+make the first thread in the queue begin running. 
+
+DESIGN for #3: 
+The plan of attack given on the assignment page is very helpful.
+Uthr struct: 
+Char *kstack  //the bottom of kernel stack for this thread
+Int tid //thread id
+Int state //the thread state
+Void *hand // the baton that a uthr object can have.
+Will need a table of uthread objects, of size NTHR 
+(which is set to 256). 
+Initial idea for hand / baton: Thought that baton was to 
+be saved as the what to the where in texit system call. 
+Asked in class - that was wrong. 
+Instead, we came up with the idea of having another array 
+of size NTHR such that there is a hand pointer for every 
+exiting thread’s baton. Use a usem on this. 
+
+Part 2 :: Implementation Notes
+
+Implement the usem struct with the following variables: 
+Uint counter //the counter for a semaphore
+Int queue[] //a queue of threads trying to get this sem
+Uint front //the position of the first thread in the queue
+Uint back //the position of the last thread in the queue
+Uint thr_in_queue
+Int guard //A variable for determining whether we need to 
+call desch after we release the lock
+Struct uspin //uspinlock on this usem object
+
+A semaphore is initialized by calling usem_init with given parameters.
+In usem_init we will initialize the spinlock immediately and 
+acquire it. Then we set the members in usem according to the 
+input parameters and release the lock.
+
+When usem_acquire is called, it means that someone wants to 
+acquire this semaphore. Firstly we acquire the internal spinlock.
+After we get the lock, we will check if the counter is zero. 
+If it does, there is no available semaphore, then we should 
+try to put the thread into the queue containing threads 
+sleeping on this semaphore. If the queue is full , we just return.
+Otherwise we add it to the end of the queue and release the lock.
+
+The problem is that after we release the lock and before we call
+desch, the cpu may switch to another thread which holds this 
+semaphore and want to release. So now the thread has access to 
+an available semaphore and doesn't need to sleep. In order to 
+handle this situation, we add a guard variable in usem. 
+When we want to put a thread into queue, we also set guard to 
+be 1. If someone calls usem_release, it's value will be 
+0 therefore desch will not make the current thread sleep.
+
+If the counter is nonzero, we can just decrease its value 
+by 1 and release the lock.
+
+When we want to release a semaphore, we should first check 
+if some threads are waiting for it. If it does, we need to 
+wake up a thread from the queue and call mkrun. We also 
+handle the situation that mkrun fails(in usem_acquire we 
+may put a thread into queue but do not call desch). 
+If no thread is waiting, we just increase the counter.
+
+We believe that users might want to destroy the semaphore 
+because they don't want to data in critical section been 
+visited any more. So we set the value of usem pointer to 
+zero directly and do not wake up the threads sleeping on this
+semaphore.
+
+Part 3 :: Implementation Notes
+
+Implement the uthr struct with the following variables: 
+a char* stack notating where the bottom of the stack for 
+this thread is. It has an int tid, and an int state 
+indicating if that thread is currently active or not.
+We’ve implemented a struct hand as well with a usem in 
+it to help keep track of all batons no matter if a thread 
+exits before or after a join is called. 
+There is an array of all these hands, of length NTHR.
+Overall, there is a uthr_table of NTHR open spots to keep 
+track of all threads. 
+We emphasize that we don’t include the first / main thread 
+of a process in our implementation, since we did not 
+create that and thus shouldn’t free it.
+
+Uthr_init initializes the thread stack size, all necessary 
+semaphores (one for uthr_malloc, one for uthr_free, 
+one for our pool array, and one for our uthr_table), 
+and then initializes all necessary arrays. 
+We put this first initial thread into index 0 of the array 
+and set it to RUNNABLE.
+
+Uthr_create takes a function pointer and a void* argument 
+to be used in tspawn. First we acquire the uthr_table’s 
+semaphore. If the table is full, we don’t create more 
+threads and return -1. 
+We then look for the next UNUSED spot.
+We call uthr_malloc and then tspawn with the relevant parameters.
+If tspawn returns an error code, we have a sanity check that 
+then frees the memory alloc’d and then releases the semaphore 
+before returning -1.
+We then want to set up this thread’s pool. 
+We find the first empty spot in the array of pools and set 
+that one to be this thread’s index. 
+We then set up uthr_table to include this new thread by 
+incrementing the total count, setting the tid, the state, 
+and the stack pointer. 
+
+Uthr_exit takes as a parameter a void pointer called baton. 
+We acquire the semaphores to the uthr_table and to the pool array. 
+We look for the current thread (the one calling exit) in 
+the table of all threads and set it to ZOMBIE.
+Baton is then saved in the hands array for join to have access to it.
+We then release all semaphores and then call texit.
+
+Uthr_join first makes sure that hand isn’t 0, or that 
+the thread isn’t trying to join with itself. 
+We then have a do/while loop that looks for the right 
+pool associated to the thread we want to join in our pool array. 
+We use a do/while loop here instead of a for(;;) loop that
+ occurs in wait() for processes. 
+We then get the correct baton from the hands array and 
+put it to the hand parameter.
+The exited thread’s pool is now reset to empty.
+We then find the thread that has exited in the uthr_table. 
+Checking to see if it was set to ZOMBIE state, we then free 
+that memory and clean up. 
+The table’s semaphore is released, and the thread’s pool 
+is reset to -1. 
+Uthr_malloc and uthr_free are edited to become thread 
+safe - with the use of semaphores. 
+
+
+
+
+
+
+

@@ -1,0 +1,10 @@
+Kernel debugging assistance information
+This information is for the kernel calling itself xv6-rev8-115-gf210129
+If you have a different version, this information is likely useless
+
+Useful symbols to know:
+801080d2 T sys_exec
+80104e6e T userinit
+
+The IRET in trapret is:
+   0x8010877c <+10>:	iret   
